@@ -52,7 +52,7 @@ haste_document.prototype.load = function(key, callback, lang) {
 };
 
 // Save this document to the server and lock it here
-haste_document.prototype.save = function(data, callback) {
+haste_document.prototype.save = function(data, optlang, callback) {
   if (this.locked) {
     return false;
   }
@@ -67,10 +67,11 @@ haste_document.prototype.save = function(data, callback) {
       _this.locked = true;
       _this.key = res.key;
       var high = hljs.highlightAuto(data);
+
       callback(null, {
         value: high.value,
         key: res.key,
-        language: high.language,
+        language: optlang || high.language,
         lineCount: data.split("\n").length
       });
     },
@@ -86,21 +87,61 @@ haste_document.prototype.save = function(data, callback) {
 };
 
 ///// represents the paste application
-
 var haste = function(appName, options) {
   this.appName = appName;
   this.$textarea = $('textarea');
   this.$box = $('#box');
   this.$code = $('#box code');
   this.$linenos = $('#linenos');
+  this.$langselect = $('.language-select');
   this.options = options;
   this.configureShortcuts();
   this.configureButtons();
+  this.updateTimer = -1;
+  this.savedLanguage = undefined;
+
   // If twitter is disabled, hide the button
   if (!options.twitter) {
     $('#box2 .twitter').hide();
   }
-};
+	
+  var self = this;
+  this.$textarea.keydown(function() { 
+	  clearTimeout(self.updateTimer);
+	  self.updateTimer = setTimeout(function() {
+		  if (!self.savedLanguage) {
+			  var text = self.$textarea.val();
+			  var hi = hljs.highlightAuto(text); 
+
+			  console.log(hi.language);
+			  self.$langselect.val(self.lookupExtensionByType(hi.language));
+		  }
+	  }, 250);
+  });
+
+  this.$langselect.change(function() {
+	  if (self.doc && self.doc.locked) {
+		  self.loadDocument(self.doc.key + ".arb", self.$langselect.val());
+	  } else {
+		  self.savedLanguage = self.$langselect.val();
+	  }
+  });
+
+  var keys = Object.keys(haste.extensionMap).sort();
+
+  for (var i in keys) {
+	  var l = keys[i];
+	  var elem = $("<option></option>");
+	  elem.attr("value", l);
+	  elem.text(l + "  (" + haste.extensionMap[l] + ")");
+	  this.$langselect.append(elem);
+  }
+
+  this.$langselect.val("md");
+}
+
+haste.prototype.updateLanguage = function() {
+	}
 
 // Set the page title - include the appName
 haste.prototype.setTitle = function(ext) {
@@ -147,9 +188,12 @@ haste.prototype.configureKey = function(enable) {
 haste.prototype.newDocument = function(hideHistory) {
   this.$box.hide();
   this.doc = new haste_document();
+  this.savedLanguage = undefined;
+
   if (!hideHistory) {
     window.history.pushState(null, this.appName, '/');
   }
+
   this.setTitle();
   this.lightKey();
   this.$textarea.val('').show('fast', function() {
@@ -164,10 +208,10 @@ haste.prototype.newDocument = function(hideHistory) {
 // Note: optimized for lookupTypeByExtension
 haste.extensionMap = {
   rb: 'ruby', py: 'python', pl: 'perl', php: 'php', scala: 'scala', go: 'go',
-  xml: 'xml', html: 'xml', htm: 'xml', css: 'css', js: 'javascript', vbs: 'vbscript',
-  lua: 'lua', pas: 'delphi', java: 'java', cpp: 'cpp', cc: 'cpp', m: 'objectivec',
-  vala: 'vala', cs: 'cs', sql: 'sql', sm: 'smalltalk', lisp: 'lisp', ini: 'ini',
-  diff: 'diff', bash: 'bash', sh: 'bash', tex: 'tex', erl: 'erlang', hs: 'haskell',
+  xml: 'xml', html: 'xml', htm: 'xml', css: 'css', js: 'javascript',
+  lua: 'lua', java: 'java', cpp: 'cpp', cc: 'cpp',
+  cs: 'cs', sql: 'sql', sm: 'smalltalk', ini: 'ini',
+  diff: 'diff', bash: 'bash', sh: 'bash', erl: 'erlang', hs: 'haskell',
   md: 'markdown', txt: '', coffee: 'coffee', json: 'javascript'
 };
 
@@ -202,9 +246,17 @@ haste.prototype.removeLineNumbers = function() {
 };
 
 // Load a document and show it
-haste.prototype.loadDocument = function(key) {
+haste.prototype.loadDocument = function(key, opttype) {
   // Split the key up
   var parts = key.split('.', 2);
+
+  if (opttype) { 
+	  parts[1] = this.lookupExtensionByType(opttype); 
+	  window.history.pushState(null, this.appName + "-" + parts[0], parts[0] + "." + parts[1]);
+  } else {
+	  this.$langselect.val(parts[1]);
+  }
+
   // Ask for what we want
   var _this = this;
   _this.doc = new haste_document();
@@ -235,7 +287,8 @@ haste.prototype.duplicateDocument = function() {
 // Lock the current document
 haste.prototype.lockDocument = function() {
   var _this = this;
-  this.doc.save(this.$textarea.val(), function(err, ret) {
+
+  this.doc.save(this.$textarea.val(), this.savedLanguage, function(err, ret) {
     if (err) {
       _this.showMessage(err.message, 'error');
     }
@@ -361,7 +414,6 @@ haste.prototype.configureShortcuts = function() {
 
 ///// Tab behavior in the textarea - 2 spaces per tab
 $(function() {
-
   $('textarea').keydown(function(evt) {
     if (evt.keyCode === 9) {
       evt.preventDefault();
